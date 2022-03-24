@@ -4,11 +4,11 @@
 import os
 
 if __name__ == "__main__":
-    datasets_path   = "datasets/"
+    datasets_path   = "face_datasets/"
     types_name      = os.listdir(datasets_path)
     types_name      = sorted(types_name)
 
-    list_file = open('cls_train.txt', 'w')
+    list_file = open('cls_train_test.txt', 'w')
     for cls_id, type_name in enumerate(types_name):
         photos_path = os.path.join(datasets_path, type_name)
         if not os.path.isdir(photos_path):
