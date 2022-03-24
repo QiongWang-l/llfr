@@ -43,7 +43,7 @@ def get_arg_parser():
     # FR facenet参数
     parser.add_argument("--input_shape", type=list, default=[160, 160, 3],
                         choices=[[160, 160, 3], [112, 112, 3]], help='输入图像大小')
-    parser.add_argument("--annotation_path", type=str, default='cls_train_test.txt',
+    parser.add_argument("--annotation_path", type=str, default='cls_train.txt',
                         help='指向根目录下的cls_train.txt，读取人脸路径与标签')
     parser.add_argument("--num_val", type=int, default=0, help='验证集大小')
     parser.add_argument("--num_train", type=int, default=0, help='训练集大小')
@@ -62,9 +62,9 @@ def get_arg_parser():
     parser.add_argument("--step_size", type=int, default=10000)
     parser.add_argument("--crop_val", action='store_true', default=False,
                         help='crop validation (default: False)')
-    parser.add_argument("--batch_size", type=int, default=4,
+    parser.add_argument("--batch_size", type=int, default=32,
                         help='batch size (default: 16)')
-    parser.add_argument("--val_batch_size", type=int, default=4,
+    parser.add_argument("--val_batch_size", type=int, default=16,
                         help='batch size for validation (default: 4)')
     parser.add_argument("--crop_size", type=int, default=160)
 
@@ -85,8 +85,8 @@ def get_arg_parser():
     parser.add_argument("--download", action='store_true', default=False,
                         help="download datasets")
 
-    parser.add_argument('--lowlight_lr', type=float, default=0.001)
-    parser.add_argument('--lowlight_weight_decay', type=float, default=0.001)
+    parser.add_argument('--lowlight_lr', type=float, default=0.0001)
+    parser.add_argument('--lowlight_weight_decay', type=float, default=0.0001)
     parser.add_argument('--grad_clip_norm', type=float, default=0.1)
     parser.add_argument('--snapshots_folder', type=str, default="LLE/")
     return parser
@@ -205,7 +205,7 @@ def main():
     if True:
         lr = 1e-3
         Init_Epoch = 0
-        Interval_Epoch = 50
+        Interval_Epoch = 40
 
         epoch_step = opts.num_train // opts.batch_size
         epoch_step_val = opts.num_val // opts.val_batch_size
@@ -265,7 +265,6 @@ def main():
                     GT = torch.stack((X_GT, Y_GT), 0)
                     GT = GT.cuda()
 
-
                     with torch.no_grad():
                         images = torch.from_numpy(images).to(device, dtype=torch.float32)
                         labels = torch.from_numpy(labels).to(device, dtype=torch.long)
@@ -280,21 +279,23 @@ def main():
                         temp_images = enhanced_image[t:t + 2]
                         t += 2
                         temp_loss_cont += torch.mean(max(L_con(temp_images, GT) - L_con(temp_images, L) + 0.3,
-                                                         L_con(L, temp_images) - L_con(L, temp_images)))
+                                                         L_con(L, temp_images)-L_con(L, temp_images)))
                         temp_loss_cont2 += torch.mean(max(L_const(temp_images, GT) - L_const(temp_images, L) + 0.04,
-                                                          L_con(L, temp_images) - L_con(L, temp_images)))
+                                                          L_con(L, temp_images)-L_con(L, temp_images)))
 
                     Loss_TV = 200 * L_TV(A)
                     loss_col = 8 * torch.mean(L_color(enhanced_image))
                     loss_percent = torch.mean(L_percept(images, enhanced_image))
                     loss_cont = 20 * temp_loss_cont / bs3
+                    # loss_cont = 0
                     loss_cont2 = 10 * temp_loss_cont2 / bs3
 
+                    # print('Loss_TV: %.4f' % Loss_TV.item(), 'loss_col: %.4f' % loss_col.item(), 'loss_percent: %.4f' % loss_percent.item(),
+                    #      'loss_cont: %.4f' % loss_cont.item(), 'loss_cont2: %.4f' % loss_cont2.item(), flush=True)
 
                     enhanced_img = enhanced_image.detach()
                     # labels_2 = labels.detach()
 
-                    '''
                     optimizer.zero_grad()
                     before_normalize, outputs1 = model.forward_feature(enhanced_img)
                     outputs2 = model.forward_classifier(before_normalize)
@@ -305,8 +306,6 @@ def main():
 
                     _loss.backward()
                     optimizer.step()
-                    '''
-
 
                     lowlight_loss = Loss_TV + loss_col + loss_cont + loss_cont2 + loss_percent
                     lowlight_optimizer.zero_grad()
@@ -314,24 +313,22 @@ def main():
                     torch.nn.utils.clip_grad_norm_(DCE_net.parameters(), opts.grad_clip_norm)
                     lowlight_optimizer.step()
 
-                    '''
                     with torch.no_grad():
                         accuracy = torch.mean(
                             (torch.argmax(F.softmax(outputs2, dim=-1), dim=-1) == labels).type(torch.FloatTensor))
-                    '''
 
-                    # total_triple_loss += _triplet_loss.item()
-                    # total_CE_loss += _CE_loss.item()
-                    # total_accuracy += accuracy.item()
+                    total_triple_loss += _triplet_loss.item()
+                    total_CE_loss += _CE_loss.item()
+                    total_accuracy += accuracy.item()
                     total_LL_loss += lowlight_loss.item()
 
-                    if iteration % 20 == 0:
+                    if iteration % 200 == 0:
                         pbar.set_postfix(**{'total_triple_loss': total_triple_loss / (iteration + 1),
                                             'total_CE_loss': total_CE_loss / (iteration + 1),
                                             'lowlight_loss': total_LL_loss / (iteration + 1),
                                             'accuracy': total_accuracy / (iteration + 1),
                                             'lr': get_lr(optimizer)})
-                        pbar.update(20)
+                        pbar.update(200)
             print('Finish Train')
 
             model_train.eval()
@@ -365,13 +362,11 @@ def main():
                     GT = torch.stack((X_GT, Y_GT), 0)
                     GT = GT.cuda()
 
-
                     with torch.no_grad():
                         images = torch.from_numpy(images).to(device, dtype=torch.float32)
                         labels = torch.from_numpy(labels).to(device, dtype=torch.long)
 
                     enhanced_image_1, enhanced_image, A = DCE_net(images)
-
 
                     # 为了求对比损失
                     bs3 = opts.batch_size * 3
@@ -390,7 +385,6 @@ def main():
                     loss_cont = 20 * temp_loss_cont / bs3
                     loss_cont2 = 10 * temp_loss_cont2 / bs3
 
-                    '''
                     enhanced_img = enhanced_image.detach()
                     # labels_2 = labels.detach()
 
@@ -401,28 +395,25 @@ def main():
                     _triplet_loss = loss(outputs1, opts.batch_size)
                     _CE_loss = nn.NLLLoss()(F.log_softmax(outputs2, dim=-1), labels)
                     _loss = _triplet_loss + _CE_loss
-                    '''
 
-
-                    # lowlight_loss = Loss_TV + loss_col + loss_cont + loss_cont2 + loss_percent
+                    lowlight_loss = Loss_TV + loss_col + loss_cont + loss_cont2 + loss_percent
                     lowlight_optimizer.zero_grad()
 
+                    accuracy = torch.mean(
+                            (torch.argmax(F.softmax(outputs2, dim=-1), dim=-1) == labels).type(torch.FloatTensor))
 
-                    # accuracy = torch.mean(
-                    #        (torch.argmax(F.softmax(outputs2, dim=-1), dim=-1) == labels).type(torch.FloatTensor))
-
-                    # val_total_triple_loss += _triplet_loss.item()
-                    # val_total_CE_loss += _CE_loss.item()
-                    # val_total_accuracy += accuracy.item()
+                    val_total_triple_loss += _triplet_loss.item()
+                    val_total_CE_loss += _CE_loss.item()
+                    val_total_accuracy += accuracy.item()
                     val_total_LL_loss += lowlight_loss.item()
 
-                    if iteration % 2 == 0:
+                    if iteration % 20 == 0:
                         pbar.set_postfix(**{'val_total_triple_loss': val_total_triple_loss / (iteration + 1),
                                             'val_total_CE_loss': val_total_CE_loss / (iteration + 1),
                                             'val_lowlight_loss': val_total_LL_loss / (iteration + 1),
                                             'val_accuracy': val_total_accuracy / (iteration + 1),
                                             'lr': get_lr(optimizer)})
-                        pbar.update(2)
+                        pbar.update(20)
             print('Finish Validation')
 
             loss_history.append_loss(total_accuracy / epoch_step, (total_triple_loss + total_CE_loss) / epoch_step,
@@ -430,15 +421,15 @@ def main():
 
             print('Epoch:' + str(epoch + 1) + '/' + str(Interval_Epoch))
             print('Total FR Loss: %.4f' % ((total_triple_loss + total_CE_loss) / epoch_step))
-            # torch.save(model.state_dict(), 'logs/Epoch%d-FR_Loss%.4f-LL_Loss%.4f-FR_Val_Loss%.4f.pth' %
-            #           ((epoch + 1), (total_triple_loss + total_CE_loss) / epoch_step, total_LL_loss / epoch_step,
-            #            (val_total_triple_loss + val_total_CE_loss) / epoch_step_val))
+            torch.save(model.state_dict(), 'logs/Epoch%d-FR_Loss%.4f-LL_Loss%.4f-FR_Val_Loss%.4f.pth' %
+                       ((epoch + 1), (total_triple_loss + total_CE_loss) / epoch_step, total_LL_loss / epoch_step,
+                        (val_total_triple_loss + val_total_CE_loss) / epoch_step_val))
             torch.save(DCE_net.state_dict(), opts.snapshots_folder + "LL-Epoch" + str(epoch + 1) + '.pth')
 
             lr_scheduler.step()
 
     print("解冻训练开始************************************************")
-    if not True:
+    if True:
         lr = 1e-4
         Init_Epoch = 0
         Interval_Epoch = 50
@@ -552,13 +543,13 @@ def main():
                     total_accuracy += accuracy.item()
                     total_LL_loss += lowlight_loss.item()
 
-                    if iteration % 20 == 0:
+                    if iteration % 200 == 0:
                         pbar.set_postfix(**{'total_triple_loss': total_triple_loss / (iteration + 1),
                                             'total_CE_loss': total_CE_loss / (iteration + 1),
                                             'lowlight_loss': total_LL_loss / (iteration + 1),
                                             'accuracy': total_accuracy / (iteration + 1),
                                             'lr': get_lr(optimizer)})
-                        pbar.update(20)
+                        pbar.update(200)
             print('Finish Train')
 
             model_train.eval()
@@ -636,13 +627,13 @@ def main():
                     val_total_accuracy += accuracy.item()
                     val_total_LL_loss += lowlight_loss.item()
 
-                    if iteration % 2 == 0:
+                    if iteration % 20 == 0:
                         pbar.set_postfix(**{'val_total_triple_loss': val_total_triple_loss / (iteration + 1),
                                             'val_total_CE_loss': val_total_CE_loss / (iteration + 1),
                                             'val_lowlight_loss': val_total_LL_loss / (iteration + 1),
                                             'val_accuracy': val_total_accuracy / (iteration + 1),
                                             'lr': get_lr(optimizer)})
-                        pbar.update(2)
+                        pbar.update(20)
             print('Finish Validation')
 
             loss_history.append_loss(total_accuracy / epoch_step, (total_triple_loss + total_CE_loss) / epoch_step,

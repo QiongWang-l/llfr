@@ -11,7 +11,6 @@ from torchvision import models
 from PIL import Image
 
 
-			
 class L_spa(nn.Module):
 
     def __init__(self):
@@ -57,6 +56,8 @@ class L_spa(nn.Module):
         # E = 25*(D_left + D_right + D_up +D_down)
 
         return E
+
+
 class L_color(nn.Module):
 
     def __init__(self):
@@ -71,8 +72,9 @@ class L_color(nn.Module):
         Drg = torch.pow(mr-mg,2)
         Drb = torch.pow(mr-mb,2)
         Dgb = torch.pow(mb-mg,2)
-        k = torch.pow(torch.pow(Drg,2) + torch.pow(Drb,2) + torch.pow(Dgb,2),0.5)
-
+        t = torch.pow(Drg,2) + torch.pow(Drb,2) + torch.pow(Dgb,2)
+        t += 1e-10
+        k = torch.pow(t, 0.5)
 
         return k
 
@@ -106,8 +108,8 @@ class L_con(nn.Module):
 
         b,c,h,w = x.shape
         # 按行求平均值
-        x = torch.mean(x,1,keepdim=True)
-        y = torch.mean(y,1,keepdim=True)
+        x = torch.mean(x, 1, keepdim=True)
+        y = torch.mean(y, 1, keepdim=True)
         k = torch.mean(torch.pow(abs(x - y), 1))
 
         return k
@@ -158,11 +160,11 @@ class L_TV(nn.Module):
         batch_size = x.size()[0]
         h_x = x.size()[2]
         w_x = x.size()[3]
-        count_h =  (x.size()[2]-1) * x.size()[3]
+        count_h =(x.size()[2]-1) * x.size()[3]
         count_w = x.size()[2] * (x.size()[3] - 1)
-        h_tv = torch.pow((x[:,:,1:,:]-x[:,:,:h_x-1,:]),2).sum()
-        w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
-        return self.TVLoss_weight*2*(h_tv/count_h+w_tv/count_w)/batch_size
+        h_tv = torch.pow((x[:, :, 1:, :]-x[:, :, :h_x-1, :]),2).sum()
+        w_tv = torch.pow((x[:, :, :, 1:]-x[:, :, :, :w_x-1]),2).sum()
+        return self.TVLoss_weight*2*(h_tv/(count_h+1e-10)+w_tv/(count_w+1e-10))/batch_size
 
 class Sa_Loss(nn.Module):
     def __init__(self):
@@ -180,7 +182,6 @@ class Sa_Loss(nn.Module):
         Db = b-mb
         k =torch.pow( torch.pow(Dr,2) + torch.pow(Db,2) + torch.pow(Dg,2),0.5)
         # print(k)
-        
 
         k = torch.mean(k)
         return k
